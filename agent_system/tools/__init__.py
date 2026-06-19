@@ -1,4 +1,4 @@
 from .base import BaseTool
-from .count_people import CountPeopleTool
+from .congestion_pipeline_tool import CongestionPipelineTool
 
-__all__ = ["BaseTool", "CountPeopleTool"]
+__all__ = ["BaseTool", "CongestionPipelineTool"]

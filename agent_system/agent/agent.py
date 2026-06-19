@@ -8,14 +8,11 @@
 # 도메인을 바꾸고 싶다면 이 파일은 건드리지 않아도 된다.
 # =============================================================================
 
-import base64
 import json
 import os
 from typing import List
 
 import anthropic
-import cv2
-import numpy as np
 
 from tools.base import BaseTool
 from utils.custom_logger import GetLogger
@@ -73,11 +70,6 @@ class ClaudeAgent:
     # 내부 헬퍼
     # ─────────────────────────────────────────────────────────────────────────
 
-    def _to_base64(self, frame: np.ndarray) -> str:
-        """OpenCV BGR 프레임 → base64 JPEG 문자열."""
-        _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-        return base64.b64encode(buf).decode("utf-8")
-
     def _dispatch(self, tool_name: str, tool_input: dict) -> str:
         """
         Claude가 요청한 도구를 찾아 실행하고 JSON 문자열을 반환한다.
@@ -110,40 +102,20 @@ class ClaudeAgent:
     # 핵심 메서드 — 두뇌의 전체 실행 흐름
     # ─────────────────────────────────────────────────────────────────────────
 
-    def run(self, image: np.ndarray) -> dict:
+    def run(self, video_path: str) -> dict:
         """
-        이미지 한 장을 받아 최종 판단 JSON을 반환한다.
+        영상 파일 경로를 받아 최종 판단 JSON을 반환한다.
 
         흐름:
-          [1] 손발 도구에 현재 프레임 주입 (prepare)
-          [2] Claude에 이미지 + 도구 스키마 전달
-          [3] tool_use 루프: 도구 호출 → 결과 반환 → 재호출 …
-          [4] end_turn: 최종 JSON 파싱 후 반환
+          [1] Claude에 영상 경로 + 도구 스키마 전달
+          [2] tool_use 루프: 도구 호출 → 결과 반환 → 재호출 …
+          [3] end_turn: 최종 JSON 파싱 후 반환
         """
-        # ── [1] 손발에 현재 컨텍스트 주입 ────────────────────────────────────
-        context = {"frame": image}
-        for tool in self.tools:
-            tool.prepare(context)
-
-        # ── [2] 초기 메시지 구성: 이미지 + 분석 요청 ─────────────────────────
         tool_schemas = [t.schema for t in self.tools]
         messages = [
             {
                 "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "image/jpeg",
-                            "data": self._to_base64(image),
-                        },
-                    },
-                    {
-                        "type": "text",
-                        "text": "이 장면을 분석하라. 필요한 도구를 먼저 호출한 뒤 최종 판단을 JSON으로 출력하라.",
-                    },
-                ],
+                "content": f"다음 영상을 분석하라. 경로: {video_path}",
             }
         ]
 

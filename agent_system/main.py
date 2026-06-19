@@ -16,7 +16,6 @@ from pathlib import Path
 import domains
 from agent import ClaudeAgent, DEFAULT_MODEL, MODEL_ALIASES
 from utils.display import print_result
-from utils.video import sample_frames
 from utils.custom_logger import GetLogger
 from dotenv import load_dotenv
 
@@ -26,7 +25,6 @@ logger = GetLogger("main", "logs/main.log")
 def main():
     parser = argparse.ArgumentParser(description="에이전트 기반 영상 분석 MVP")
     parser.add_argument("--video", help="분석할 동영상 파일 경로")
-    parser.add_argument("--interval", type=int, default=5, help="샘플링 간격(초), 기본: 5")
     parser.add_argument(
         "--domain",
         default="congestion",
@@ -65,27 +63,22 @@ def main():
         logger.error(f"초기화 실패: {e}")
         sys.exit(1)
 
-    results = []
-    logger.info(f"도메인: {args.domain} | 모델: {args.model} ({MODEL_ALIASES[args.model]}) | 동영상: {args.video} | 간격: {args.interval}초")
+    logger.info(f"도메인: {args.domain} | 모델: {args.model} ({MODEL_ALIASES[args.model]}) | 동영상: {args.video}")
 
-    # ── [프레임별 분석] ───────────────────────────────────────────────────────
-    for frame, timestamp in sample_frames(args.video, args.interval):
-        logger.info(f"[{timestamp:6.1f}초] 분석 중...")
-        try:
-            result = agent.run(frame)
-            result["timestamp"] = timestamp
-            results.append(result)
-            print_result(result)
-        except Exception as e:
-            logger.error(f"프레임 분석 오류 ({timestamp:.1f}초): {e}")
-            results.append({"timestamp": timestamp, "error": str(e)})
+    # ── [영상 분석] ───────────────────────────────────────────────────────────
+    try:
+        result = agent.run(args.video)
+        print_result(result)
+    except Exception as e:
+        logger.error(f"분석 오류: {e}")
+        result = {"error": str(e)}
 
     # ── [결과 저장] ───────────────────────────────────────────────────────────
     output = "results.json"
     with open(output, "w", encoding="utf-8") as f:
-        json.dump(results, f, ensure_ascii=False, indent=2)
+        json.dump(result, f, ensure_ascii=False, indent=2)
 
-    logger.info(f"완료: {len(results)}프레임 → {output}")
+    logger.info(f"완료 → {output}")
 
 
 if __name__ == "__main__":
