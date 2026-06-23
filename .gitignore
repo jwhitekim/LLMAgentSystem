@@ -19,3 +19,9 @@ results/
 results.json
 web.stdout.log
 web.stderr.log
+
+# video files
+sample.mp4
+
+# model files
+yolov8m.pt
