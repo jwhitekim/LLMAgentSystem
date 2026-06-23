@@ -6,6 +6,7 @@ import anthropic
 
 from tools.base import BaseTool
 from utils.custom_logger import GetLogger
+from dotenv import load_dotenv
 
 logger = GetLogger("agent", "logs/agent.log")
 
@@ -15,7 +16,7 @@ MODEL_ALIASES = {
     "sonnet": "claude-sonnet-4-6",
     "haiku": "claude-haiku-4-5-20251001",
 }
-DEFAULT_MODEL = "opus"
+DEFAULT_MODEL = "sonnet"
 
 
 class ClaudeAgent:
@@ -28,6 +29,7 @@ class ClaudeAgent:
     """
 
     def __init__(self, system_prompt: str, tools: List[BaseTool], model: str = MODEL_ALIASES[DEFAULT_MODEL]):
+        load_dotenv()
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
             raise RuntimeError("ANTHROPIC_API_KEY environment variable is required.")

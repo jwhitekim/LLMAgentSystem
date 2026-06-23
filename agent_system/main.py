@@ -1,17 +1,19 @@
 import argparse
 import json
 import sys
+import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 import domains
 from agent import ClaudeAgent, DEFAULT_MODEL, MODEL_ALIASES
-from utils.display import print_result
 from utils.video import build_vision_content
 from utils.custom_logger import GetLogger
 
 logger = GetLogger("main", "logs/main.log")
+
+RESULTS_DIR = Path(__file__).resolve().parent.parent / "results"
 
 
 def _load_video_info(video_path: Path) -> dict:
@@ -83,18 +85,17 @@ def main() -> None:
     for index, segment in enumerate(segments, start=1):
         start_sec = segment["start_sec"]
         end_sec = segment["end_sec"]
-        logger.info("Analyzing segment %s/%s: %s~%s", index, len(segments), start_sec, end_sec)
+        logger.info("Analyzing segment %s/%s: %ss~%ss", index, len(segments), start_sec, end_sec)
 
         try:
             # 여기서 각 구간을 ClaudeAgent(판단 본체)에 넘긴다. 도구 호출 여부는 LLM(두뇌 역할)이 결정한다.
             content = build_vision_content(str(video_path), start_sec, end_sec)
             result = agent.run(content)
             record = {"segment_index": index, "segment": segment, "result": result}
-            print_result(record)
+            logger.info("Segment %s result: %s", index, json.dumps(result, ensure_ascii=False))
         except Exception as exc:
-            logger.exception("Segment analysis failed")
+            logger.exception("Segment %s analysis failed", index)
             record = {"segment_index": index, "segment": segment, "error": str(exc)}
-            print_result(record)
         results.append(record)
 
     output = {
@@ -105,10 +106,13 @@ def main() -> None:
         "video_info": video_info,
         "segments": results,
     }
-    with open("results.json", "w", encoding="utf-8") as file:
-        json.dump(output, file, ensure_ascii=False, indent=2)
 
-    logger.info("Saved results.json")
+    RESULTS_DIR.mkdir(exist_ok=True)
+    result_id = uuid.uuid4().hex[:12]
+    result_path = RESULTS_DIR / f"{result_id}.json"
+    result_path.write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
+    logger.info("Saved %s", result_path)
+    print(str(result_path))
 
 
 if __name__ == "__main__":
