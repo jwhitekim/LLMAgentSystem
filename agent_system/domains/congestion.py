@@ -21,6 +21,7 @@ SYSTEM_PROMPT = """너는 혼잡 상황을 판단하는 LLM(두뇌 역할)이다
 - congestion_level은 "low", "medium", "high" 중 하나다.
 - action은 "none", "monitor", "alert" 중 하나다.
 - local_hotspots는 국소 혼잡 구역이 없으면 빈 리스트로 둔다.
+- 아래 6개 필드만 출력하라. frame_timestamp·tool_called·tool_raw는 시스템이 자동으로 추가한다.
 {
   "total_people": <정수>,
   "distribution_summary": "<어디에 몰렸는지 또는 고르게 퍼졌는지에 대한 한국어 설명>",
@@ -29,6 +30,24 @@ SYSTEM_PROMPT = """너는 혼잡 상황을 판단하는 LLM(두뇌 역할)이다
   "reasoning": "<장면 관찰과 도구 사실을 종합한 한국어 판단 근거>",
   "action": "none" | "monitor" | "alert"
 }"""
+
+# results.json에 저장되는 프레임 결과 전체 스키마 (참고용).
+# LLM(두뇌 역할)이 출력하는 6개 필드 + 에이전트 시스템이 자동으로 추가하는 3개 필드.
+# tool_raw: 도구(손발 역할)가 준 사실 vs LLM(두뇌 역할)의 분포 판단을 나중에 비교하기 위한 연구용 데이터. 절대 버리지 마라.
+# FULL_FRAME_SCHEMA = {
+#   "frame_timestamp": <초>,            # 세그먼트 시작 시각 (시스템 추가)
+#   "tool_called": <bool>,              # LLM이 도구를 호출했는지 (시스템 추가)
+#   "tool_raw": {                       # 도구(손발 역할)의 raw 사실 원본 (시스템 추가)
+#     "zone_counts": { "구역명": 인원수, ... },
+#     "tracks": [ { "track_id":.., "center":[..], "bbox":[..] }, ... ]
+#   },
+#   "total_people": <정수>,
+#   "distribution_summary": "<한국어>",
+#   "congestion_level": "low" | "medium" | "high",
+#   "local_hotspots": ["<구역 설명>", ...],
+#   "reasoning": "<한국어>",
+#   "action": "none" | "monitor" | "alert"
+# }
 
 
 def get_domain() -> dict:

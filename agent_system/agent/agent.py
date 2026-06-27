@@ -1,5 +1,6 @@
 import json
 import os
+from pathlib import Path
 from typing import List
 
 import anthropic
@@ -8,7 +9,8 @@ from tools.base import BaseTool
 from utils.custom_logger import GetLogger
 from dotenv import load_dotenv
 
-logger = GetLogger("agent", "logs/agent.log")
+_LOGS_DIR = Path(__file__).resolve().parent.parent.parent / "logs"
+logger = GetLogger("agent", str(_LOGS_DIR / "agent.log"))
 
 
 MODEL_ALIASES = {
@@ -40,18 +42,41 @@ class ClaudeAgent:
         self.tools = tools
         self._tool_map: dict[str, BaseTool] = {tool.schema["name"]: tool for tool in tools}
 
-    def _dispatch(self, tool_name: str, tool_input: dict) -> str:
-        """LLM(두뇌 역할)이 요청한 도구(손발 역할)를 이름으로 찾아 실행한다. 도구 실패도 JSON으로 돌려준다."""
+    def _dispatch(self, tool_name: str, tool_input: dict) -> tuple[str, dict | None]:
+        """
+        LLM(두뇌 역할)이 요청한 도구(손발 역할)를 이름으로 찾아 실행한다.
+        (JSON 문자열, 파싱된 raw dict) 쌍을 반환한다. 도구 실패 시 raw는 None.
+        """
         tool = self._tool_map.get(tool_name)
         if tool is None:
-            return json.dumps({"error": f"Unknown tool: {tool_name}"}, ensure_ascii=False)
+            err = json.dumps({"error": f"Unknown tool: {tool_name}"}, ensure_ascii=False)
+            return err, None
 
         try:
             result = tool.run(tool_input)
-            return json.dumps(result, ensure_ascii=False)
+            return json.dumps(result, ensure_ascii=False), result
         except Exception as exc:
             logger.exception("Tool execution failed: %s", tool_name)
-            return json.dumps({"error": f"Tool failed: {exc}"}, ensure_ascii=False)
+            err = json.dumps({"error": f"Tool failed: {exc}"}, ensure_ascii=False)
+            return err, None
+
+    def _build_tool_raw(self, raw: dict) -> dict:
+        """
+        도구(손발 역할)의 raw 출력에서 연구 비교용 핵심 사실만 추출한다.
+        # 도구가 준 사실 vs LLM(두뇌 역할)의 분포 판단을 나중에 비교하기 위한 연구용 데이터.
+        # 절대 버리지 말 것 — 이게 에이전트 시스템의 연구 칼날이다.
+        zone_counts: 구역별 최종 인원 (list → dict 변환으로 가독성 확보)
+        tracks: 각 사람의 마지막 위치 (frames_present는 제외해 용량 절감)
+        """
+        zone_counts = {
+            item["zone"]: item["people_count"]
+            for item in raw.get("zone_counts", [])
+        }
+        tracks = [
+            {"track_id": p["track_id"], "center": p["center"], "bbox": p["bbox"]}
+            for p in raw.get("people", [])
+        ]
+        return {"zone_counts": zone_counts, "tracks": tracks}
 
     def _parse_json(self, text: str) -> dict:
         text = text.strip()
@@ -71,9 +96,13 @@ class ClaudeAgent:
         여기서 LLM(두뇌 역할)이 도구(손발 역할) 호출을 결정한다.
         LLM이 도구를 호출하면 그때 실행하고, 도구(손발 역할)가 준 사실을 다시 LLM에게 넘긴다.
         최종 판단은 LLM의 JSON 응답만 사용한다.
+        반환 dict에 tool_called(bool)과 tool_raw(도구 원본 사실)가 시스템이 자동으로 추가된다.
         """
         messages = [{"role": "user", "content": content}]
         tool_schemas = [tool.schema for tool in self.tools]
+
+        tool_called = False
+        tool_raw: dict | None = None
 
         while True:
             try:
@@ -88,6 +117,7 @@ class ClaudeAgent:
                 raise RuntimeError(f"Claude API request failed: {exc}") from exc
 
             if response.stop_reason == "tool_use":
+                tool_called = True
                 messages.append({"role": "assistant", "content": response.content})
 
                 tool_results = []
@@ -95,7 +125,10 @@ class ClaudeAgent:
                     if getattr(block, "type", None) != "tool_use":
                         continue
                     logger.info("Claude requested tool: %s", block.name)
-                    result_str = self._dispatch(block.name, block.input)
+                    result_str, raw_dict = self._dispatch(block.name, block.input)
+                    # 도구(손발 역할)의 마지막 raw 출력을 보존한다 (연구용).
+                    if raw_dict is not None:
+                        tool_raw = self._build_tool_raw(raw_dict)
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,
@@ -108,7 +141,11 @@ class ClaudeAgent:
             if response.stop_reason == "end_turn":
                 for block in response.content:
                     if hasattr(block, "text") and block.text.strip():
-                        return self._parse_json(block.text)
+                        result = self._parse_json(block.text)
+                        # LLM(두뇌 역할)의 판단 결과에 시스템 메타데이터를 추가한다.
+                        result["tool_called"] = tool_called
+                        result["tool_raw"] = tool_raw
+                        return result
                 raise ValueError("Claude returned no text block.")
 
             raise ValueError(f"Unexpected stop_reason: {response.stop_reason}")
