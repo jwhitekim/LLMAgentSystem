@@ -1,10 +1,10 @@
 from pathlib import Path
 
 from web.settings import LOGS_DIR
-from web.backend.utils import _build_segments
 
 import agent_system.domains as domains
 from agent_system.agent import ClaudeAgent, MODEL_ALIASES
+from agent_system.utils.utils import _build_segments
 from agent_system.utils.video import build_vision_content, load_video_info
 from agent_system.utils.custom_logger import GetLogger
 

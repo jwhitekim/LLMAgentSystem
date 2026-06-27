@@ -1,53 +1,22 @@
 import argparse
-import json
 import sys
-import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 import domains
 from agent import ClaudeAgent, DEFAULT_MODEL, MODEL_ALIASES
-from utils.video import build_vision_content
+from utils.video import CustomCongestionVideoCapture
 from utils.custom_logger import GetLogger
+from utils.display import print_result
+from utils.runner import run_segments, save_result
 
-logger = GetLogger("main", "logs/main.log")
+ROOT_DIR = Path(__file__).resolve().parent.parent 
+_LOGS_DIR = ROOT_DIR / "logs"
+logger = GetLogger("main", str(_LOGS_DIR / "main.log"))
 
 RESULTS_DIR = Path(__file__).resolve().parent.parent / "results"
 
-
-def _load_video_info(video_path: Path) -> dict:
-    try:
-        import cv2
-    except ModuleNotFoundError as exc:
-        raise RuntimeError("opencv-python is required to read video metadata.") from exc
-
-    cap = cv2.VideoCapture(str(video_path))
-    if not cap.isOpened():
-        raise RuntimeError(f"Cannot open video file: {video_path}")
-
-    try:
-        fps = cap.get(cv2.CAP_PROP_FPS) or 0
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-        if total_frames <= 0:
-            raise RuntimeError(f"Cannot read frame count: {video_path}")
-        duration_sec = total_frames / fps if fps else None
-        return {"fps": fps, "total_frames": total_frames, "duration_sec": duration_sec}
-    finally:
-        cap.release()
-
-
-def _build_segments(duration_sec: float | None, interval_sec: float) -> list[dict]:
-    if duration_sec is None:
-        return [{"start_sec": 0.0, "end_sec": None}]
-
-    segments = []
-    start = 0.0
-    while start < duration_sec:
-        end = min(start + interval_sec, duration_sec)
-        segments.append({"start_sec": round(start, 3), "end_sec": round(end, 3)})
-        start = end
-    return segments
 
 
 def main() -> None:
@@ -56,6 +25,7 @@ def main() -> None:
     parser.add_argument("--interval", type=float, default=5.0, help="Segment interval in seconds. Default: 5.")
     parser.add_argument("--domain", default="congestion", help=f"Domain name. Available: {list(domains.REGISTRY)}")
     parser.add_argument("--model", default=DEFAULT_MODEL, choices=list(MODEL_ALIASES), help="Claude model alias.")
+    parser.add_argument("--verbose", action="store_true", help="터미널 출력에 reasoning 한 줄을 추가로 표시한다.")
     args = parser.parse_args()
 
     load_dotenv()
@@ -64,6 +34,8 @@ def main() -> None:
     if not video_path.exists():
         logger.error("Video file not found: %s", video_path)
         sys.exit(1)
+    else:
+        video_capture = CustomCongestionVideoCapture(video_path)
     if args.interval <= 0:
         parser.error("--interval must be greater than 0.")
 
@@ -74,45 +46,21 @@ def main() -> None:
             system_prompt=domain_config["system_prompt"],
             tools=domain_config["tools"],
             model=MODEL_ALIASES[args.model],
-            output_schema=domain_config.get("output_schema"),
         )
-        video_info = _load_video_info(video_path)
-        segments = _build_segments(video_info["duration_sec"], args.interval)
     except Exception as exc:
         logger.error("Initialization failed: %s", exc)
         sys.exit(1)
 
-    results = []
-    for index, segment in enumerate(segments, start=1):
-        start_sec = segment["start_sec"]
-        end_sec = segment["end_sec"]
-        logger.info("Analyzing segment %s/%s: %ss~%ss", index, len(segments), start_sec, end_sec)
+    results, video_info = run_segments(
+        agent, video_capture, args.interval,
+        on_record=lambda r: print_result(r, verbose=args.verbose),
+    )
 
-        try:
-            # 여기서 각 구간을 ClaudeAgent(판단 본체)에 넘긴다. 도구 호출 여부는 LLM(두뇌 역할)이 결정한다.
-            content = build_vision_content(str(video_path), start_sec, end_sec)
-            result = agent.run(content)
-            record = {"segment_index": index, "segment": segment, "result": result}
-            logger.info("Segment %s result: %s", index, json.dumps(result, ensure_ascii=False))
-        except Exception as exc:
-            logger.exception("Segment %s analysis failed", index)
-            record = {"segment_index": index, "segment": segment, "error": str(exc)}
-        results.append(record)
-
-    output = {
-        "video": str(video_path),
-        "domain": args.domain,
-        "model": args.model,
-        "interval_sec": args.interval,
-        "video_info": video_info,
-        "segments": results,
-    }
-
-    RESULTS_DIR.mkdir(exist_ok=True)
-    result_id = uuid.uuid4().hex[:12]
-    result_path = RESULTS_DIR / f"{result_id}.json"
-    result_path.write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
-    logger.info("Saved %s", result_path)
+    result_path = save_result(
+        results, video_info, video_path,
+        domain=args.domain, model=args.model,
+        interval_sec=args.interval, results_dir=RESULTS_DIR,
+    )
     print(str(result_path))
 
 
