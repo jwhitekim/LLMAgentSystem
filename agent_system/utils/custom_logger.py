@@ -50,7 +50,8 @@ _instances = {}
 def GetLogger(logger_type, logger_name=None, fmt=None) -> CustomLogging:
     if logger_type not in _instances:
         logger = CustomLogging(logger_type)
-        logger.add_file_handler(logger_name, fmt)
+        if logger_name is not None:
+            logger.add_file_handler(logger_name, fmt)
         _instances[logger_type] = logger
     return _instances[logger_type]
 
